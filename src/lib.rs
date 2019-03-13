@@ -5,7 +5,7 @@ pub use tokio_executor::park::{Park, Unpark};
 
 pub use tokio::reactor::Reactor;
 use tokio_timer::clock::Clock;
-pub use tokio_timer::timer::Timer;
+pub use tokio_timer::timer::{Timer, TimerImpl};
 
 use std::io;
 
@@ -69,6 +69,27 @@ impl Builder {
     /// Create the configured `Runtime`.
     pub fn build(&mut self) -> io::Result<Runtime<Timer<Reactor>>> {
         self.build_with_park(|park| park).map(|(rt, _)| rt)
+    }
+
+    pub fn build_with_timer<I: TimerImpl<Reactor>>(&mut self, new_timer: impl FnOnce(Reactor) -> I) -> io::Result<Runtime<Timer<Reactor, Clock, I>>> {
+        // We need a reactor to receive events about IO objects from kernel
+        let reactor = Reactor::new()?;
+        let reactor_handle = reactor.handle();
+
+        // Place a timer wheel on top of the reactor. If there are no timeouts to fire, it'll let the
+        // reactor pick up some new external events.
+        let timer = new_timer(reactor);
+        let timer = Timer::new_with_now_and_impl(self.clock.clone(), timer);
+        let timer_handle = timer.handle();
+
+        // And now put a single-threaded executor on top of the timer. When there are no futures ready
+        // to do something, it'll let the timer or the reactor to generate some new stimuli for the
+        // futures to continue in their life.
+        let executor = CurrentThread::new_with_park(timer);
+
+        let runtime = Runtime::new2(reactor_handle, timer_handle, self.clock.clone(), executor);
+
+        Ok(runtime)
     }
 
     /// Create the configured `Runtime`.
