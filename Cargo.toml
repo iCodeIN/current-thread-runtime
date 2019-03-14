@@ -5,9 +5,9 @@ authors = ["Alexander Polakov <plhk@sdf.org>"]
 edition = "2018"
 
 [dependencies]
-tokio-executor = { path = "../tokio/tokio-executor" }
-tokio-current-thread = { path = "../tokio/tokio-current-thread" }
-tokio = { path = "../tokio/" }
-tokio-timer = { path = "../tokio/tokio-timer" }
-tokio-reactor = { path = "../tokio/tokio-reactor" }
+tokio-executor = { git = "https://github.com/polachok/tokio", rev = "58f087" }
+tokio-current-thread = { git = "https://github.com/polachok/tokio", rev = "58f087" }
+tokio = { git = "https://github.com/polachok/tokio", rev = "58f087" }
+tokio-timer = { git = "https://github.com/polachok/tokio", rev = "58f087" }
+tokio-reactor = { git = "https://github.com/polachok/tokio", rev = "58f087" }
 futures = "0.1"
