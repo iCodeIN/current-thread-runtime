@@ -4,13 +4,14 @@ use tokio::executor::current_thread::CurrentThread;
 pub use tokio_executor::park::{Park, Unpark};
 
 pub use tokio::reactor::Reactor;
-use tokio_timer::clock::Clock;
-pub use tokio_timer::timer::{Timer, TimerImpl};
+pub use tokio_timer::clock::Clock;
+pub use tokio_timer::timer::{DefaultTimerImpl, Timer, TimerImpl};
 
 use std::io;
 
 mod runtime;
-use crate::runtime::Runtime;
+
+pub use crate::runtime::{Runtime, RunError};
 
 /// Builds a Single-threaded runtime with custom configuration values.
 ///
@@ -43,10 +44,11 @@ use crate::runtime::Runtime;
 /// # let _ = runtime;
 /// # }
 /// ```
-#[derive(Debug)]
-pub struct Builder {
+pub struct Builder<T = DefaultTimerImpl<Reactor>> {
     /// The clock to use
     clock: Clock,
+
+    new_timer: Box<Fn(Reactor, Clock) -> Timer<Reactor, Clock, T>>,
 }
 
 impl Builder {
@@ -57,6 +59,21 @@ impl Builder {
     pub fn new() -> Builder {
         Builder {
             clock: Clock::new(),
+            new_timer: Box::new(|reactor, clock| Timer::new_with_now(reactor, clock)),
+        }
+    }
+}
+
+impl<T> Builder<T>
+where
+    T: TimerImpl<Reactor>,
+{
+    pub fn with_timer<F>(new_timer: F) -> Self
+        where F: Fn(Reactor, Clock) -> Timer<Reactor, Clock, T> + 'static
+    {
+        Builder {
+            clock: Clock::new(),
+            new_timer: Box::new(new_timer),
         }
     }
 
@@ -67,33 +84,12 @@ impl Builder {
     }
 
     /// Create the configured `Runtime`.
-    pub fn build(&mut self) -> io::Result<Runtime<Timer<Reactor>>> {
+    pub fn build(&mut self) -> io::Result<Runtime<Timer<Reactor, Clock, T>>> {
         self.build_with_park(|park| park).map(|(rt, _)| rt)
     }
 
-    pub fn build_with_timer<I: TimerImpl<Reactor>>(&mut self, new_timer: impl FnOnce(Reactor) -> I) -> io::Result<Runtime<Timer<Reactor, Clock, I>>> {
-        // We need a reactor to receive events about IO objects from kernel
-        let reactor = Reactor::new()?;
-        let reactor_handle = reactor.handle();
-
-        // Place a timer wheel on top of the reactor. If there are no timeouts to fire, it'll let the
-        // reactor pick up some new external events.
-        let timer = new_timer(reactor);
-        let timer = Timer::new_with_now_and_impl(self.clock.clone(), timer);
-        let timer_handle = timer.handle();
-
-        // And now put a single-threaded executor on top of the timer. When there are no futures ready
-        // to do something, it'll let the timer or the reactor to generate some new stimuli for the
-        // futures to continue in their life.
-        let executor = CurrentThread::new_with_park(timer);
-
-        let runtime = Runtime::new2(reactor_handle, timer_handle, self.clock.clone(), executor);
-
-        Ok(runtime)
-    }
-
     /// Create the configured `Runtime`.
-    pub fn build_with_park<U: Park, F: FnOnce(Timer<Reactor>) -> U>(
+    pub fn build_with_park<U: Park, F: FnOnce(Timer<Reactor, Clock, T>) -> U>(
         &mut self,
         new_park: F,
     ) -> io::Result<(Runtime<U>, U::Unpark)> {
@@ -103,7 +99,7 @@ impl Builder {
 
         // Place a timer wheel on top of the reactor. If there are no timeouts to fire, it'll let the
         // reactor pick up some new external events.
-        let timer = Timer::new_with_now(reactor, self.clock.clone());
+        let timer = (self.new_timer)(reactor, self.clock.clone());
         let timer_handle = timer.handle();
 
         let park = new_park(timer);
