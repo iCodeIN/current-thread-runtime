@@ -11,7 +11,7 @@ use std::io;
 
 mod runtime;
 
-pub use crate::runtime::{Runtime, RunError};
+pub use crate::runtime::{Runtime, RunError, Handle};
 
 /// Builds a Single-threaded runtime with custom configuration values.
 ///
